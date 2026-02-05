@@ -11,7 +11,8 @@
     <main>
       <header class="hero">
         <div>
-          <h1>Codex utilization</h1>
+          <h1 class="sr-only">Codex utilization</h1>
+          <pre class="ascii-title" id="asciiTitle" aria-hidden="true"></pre>
           <div class="window-meta">
             <span id="windowLabel">All time</span>
             <span class="window-sep">•</span>
@@ -46,7 +47,7 @@
           <div class="sources-header">
             <div>
               <div class="sources-title">Sources</div>
-              <div class="sources-subtitle">Add a remote machine (password required).</div>
+              <div class="sources-subtitle">Add a remote machine (ssh).</div>
             </div>
             <button class="ghost" id="toggleSourceForm">+ Source</button>
           </div>
@@ -102,10 +103,11 @@
         <div class="chart-header">
           <div>
             <div class="chart-title" id="chartTitle">Tokens by day</div>
-            <div class="chart-subtitle" id="chartSubtitle">Tokens per bucket.</div>
+            <div class="chart-subtitle" id="chartSubtitle"></div>
           </div>
-          <div class="legend">
-            <span class="dot any"></span> Tokens
+          <div class="chart-status" id="loadingIndicator" aria-live="polite">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="loading-label">Loading</span>
           </div>
         </div>
         <canvas id="chart"></canvas>

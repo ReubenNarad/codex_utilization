@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import errno
 import shutil
 import subprocess
 import uuid
@@ -53,6 +54,14 @@ class Handler(BaseHTTPRequestHandler):
         parts = parsed.path.strip("/").split("/")
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "sources" and parts[3] == "sync":
             self.handle_sources_sync(parts[2])
+            return
+        self.send_error(404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "sources":
+            self.handle_sources_delete(parts[2])
             return
         self.send_error(404)
 
@@ -130,6 +139,24 @@ class Handler(BaseHTTPRequestHandler):
             save_sources(sources)
             self.send_json({"error": str(exc)}, status=500)
 
+    def handle_sources_delete(self, source_id: str) -> None:
+        sources = load_sources()
+        existing = next((item for item in sources if item.get("id") == source_id), None)
+        if not existing:
+            self.send_json({"error": "Source not found."}, status=404)
+            return
+
+        updated = [item for item in sources if item.get("id") != source_id]
+        try:
+            source_root = SOURCES_DIR / source_id
+            if source_root.exists():
+                shutil.rmtree(source_root)
+            save_sources(updated)
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, status=500)
+            return
+        self.send_json({"ok": True}, status=200)
+
     def handle_static(self, raw_path: str) -> None:
         path = raw_path
         if path == "/" or path == "":
@@ -151,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        self.write_response_body(data)
 
     def send_json(self, payload: dict, status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -160,7 +187,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        self.write_response_body(data)
+
+    def write_response_body(self, data: bytes) -> None:
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected before reading the response.
+            return
+        except OSError as exc:
+            # Treat expected disconnect errors as benign.
+            if exc.errno in (errno.EPIPE, errno.ECONNRESET):
+                return
+            raise
 
     def read_json(self) -> dict | None:
         length = int(self.headers.get("Content-Length", "0") or "0")

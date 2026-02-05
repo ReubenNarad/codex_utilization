@@ -33,6 +33,7 @@ const elements = {
   chart: document.getElementById("chart"),
   chartTitle: document.getElementById("chartTitle"),
   chartSubtitle: document.getElementById("chartSubtitle"),
+  loadingIndicator: document.getElementById("loadingIndicator"),
   toggleSourceForm: document.getElementById("toggleSourceForm"),
   sourceForm: document.getElementById("sourceForm"),
   sourceLabel: document.getElementById("sourceLabel"),
@@ -43,6 +44,7 @@ const elements = {
   sourcePath: document.getElementById("sourcePath"),
   sourceCancel: document.getElementById("sourceCancel"),
   sourcesList: document.getElementById("sourcesList"),
+  asciiTitle: document.getElementById("asciiTitle"),
 };
 
 function formatPct(value) {
@@ -132,6 +134,15 @@ async function syncSource(id) {
   return data;
 }
 
+async function deleteSource(id) {
+  const response = await fetch(`/api/sources/${id}`, { method: "DELETE" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to disconnect source");
+  }
+  return data;
+}
+
 function setActiveButton(key) {
   document.querySelectorAll(".button-row button").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.window === key);
@@ -150,7 +161,7 @@ function updateHeader(data, label) {
 function updateChartMeta(data) {
   const label = data.granularity || "day";
   elements.chartTitle.textContent = `Tokens by ${label}`;
-  elements.chartSubtitle.textContent = "Tokens per bucket.";
+  elements.chartSubtitle.textContent = "";
 }
 
 function updateStats(data) {
@@ -161,6 +172,10 @@ function updateStats(data) {
   } else {
     elements.costUsd.textContent = "--";
   }
+}
+
+function setLoading(isLoading) {
+  elements.loadingIndicator.classList.toggle("active", Boolean(isLoading));
 }
 
 function setSelectedWindow(key) {
@@ -175,6 +190,7 @@ function setSelectedWindow(key) {
     elements.costUsd.textContent = "--";
     state.chartData = [];
     drawChart();
+    setLoading(false);
     return;
   }
   if (cached) {
@@ -184,8 +200,10 @@ function setSelectedWindow(key) {
     state.chartData = cached.token_buckets || [];
     state.granularity = cached.granularity || "day";
     drawChart();
+    setLoading(false);
     return;
   }
+  setLoading(true);
   fetchUptime({ window: key })
     .then((data) => {
       state.cache.set(key, data);
@@ -198,6 +216,9 @@ function setSelectedWindow(key) {
     })
     .catch((err) => {
       elements.uptimePct.textContent = `Error: ${err.message}`;
+    })
+    .finally(() => {
+      setLoading(false);
     });
 }
 
@@ -223,6 +244,7 @@ function applyCustomRange() {
   const start = elements.startInput.value;
   const end = elements.endInput.value;
   if (!start || !end) return;
+  setLoading(true);
   fetchUptime({ start, end })
     .then((data) => {
       state.cache.set("custom", data);
@@ -238,6 +260,9 @@ function applyCustomRange() {
     })
     .catch((err) => {
       elements.uptimePct.textContent = `Error: ${err.message}`;
+    })
+    .finally(() => {
+      setLoading(false);
     });
 }
 
@@ -268,6 +293,7 @@ function drawChart() {
 
   ctx.clearRect(0, 0, width, height);
 
+  const theme = getChartTheme();
   const padding = { top: 24, right: 20, bottom: 34, left: 56 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
@@ -302,9 +328,9 @@ function drawChart() {
   const labelEvery = entries.length > 18 ? Math.ceil(entries.length / 12) : 1;
 
   const ticks = getLinearTicks(maxTokens);
-  ctx.strokeStyle = "rgba(29, 26, 22, 0.12)";
-  ctx.fillStyle = "rgba(29, 26, 22, 0.55)";
-  ctx.font = "11px 'Space Grotesk', 'Avenir Next', sans-serif";
+  ctx.strokeStyle = theme.grid;
+  ctx.fillStyle = theme.label;
+  ctx.font = theme.font;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   ticks.forEach((value) => {
@@ -322,22 +348,22 @@ function drawChart() {
     const heightPx = (tokens / maxValue) * chartHeight;
     const y = chartHeight - heightPx;
 
-    ctx.fillStyle = "rgba(11, 111, 106, 0.7)";
-    ctx.shadowColor = "rgba(11, 111, 106, 0.2)";
+    ctx.fillStyle = theme.bar;
+    ctx.shadowColor = theme.barGlow;
     ctx.shadowBlur = 6;
     ctx.fillRect(x, y, barWidth, heightPx);
 
     ctx.shadowBlur = 0;
     if (index % labelEvery === 0) {
-      ctx.fillStyle = "rgba(29, 26, 22, 0.65)";
-      ctx.font = "11px 'Space Grotesk', 'Avenir Next', sans-serif";
+      ctx.fillStyle = theme.label;
+      ctx.font = theme.font;
       ctx.textAlign = "center";
       ctx.fillText(formatBucketLabel(entry, state.granularity), x + barWidth / 2, chartHeight + 18);
     }
 
     if (state.hoverIndex === index) {
-      ctx.fillStyle = "rgba(29, 26, 22, 0.65)";
-      ctx.font = "11px 'Space Grotesk', 'Avenir Next', sans-serif";
+      ctx.fillStyle = theme.hover;
+      ctx.font = theme.font;
       ctx.textAlign = "center";
       ctx.fillText(formatTokens(tokens), x + barWidth / 2, y - 6);
     }
@@ -352,6 +378,19 @@ function drawChart() {
   });
 
   ctx.restore();
+}
+
+function getChartTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const value = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+  return {
+    grid: value("--chart-grid", "rgba(120, 255, 150, 0.15)"),
+    label: value("--chart-label", "rgba(185, 255, 170, 0.7)"),
+    bar: value("--chart-bar", "rgba(82, 255, 124, 0.7)"),
+    barGlow: value("--chart-bar-glow", "rgba(82, 255, 124, 0.35)"),
+    hover: value("--chart-hover", "rgba(220, 255, 210, 0.9)"),
+    font: value("--chart-font", "11px 'IBM Plex Mono', ui-monospace, monospace"),
+  };
 }
 
 function formatBucketLabel(entry, granularity) {
@@ -426,21 +465,52 @@ function renderSources(sources) {
     const syncBtn = document.createElement("button");
     syncBtn.className = "ghost";
     syncBtn.textContent = "Sync now";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "ghost source-remove";
+    removeBtn.textContent = "x";
+    removeBtn.title = "Disconnect source";
+    removeBtn.setAttribute("aria-label", "Disconnect source");
+
+    const setBusy = (busy) => {
+      syncBtn.disabled = busy;
+      removeBtn.disabled = busy;
+    };
+
     syncBtn.addEventListener("click", async () => {
       syncBtn.textContent = "Syncing...";
-      syncBtn.disabled = true;
+      setBusy(true);
       try {
         await syncSource(source.id);
         await refreshSources();
+        state.cache.clear();
         setSelectedWindow(state.selected);
       } catch (err) {
         alert(err.message);
       } finally {
         syncBtn.textContent = "Sync now";
-        syncBtn.disabled = false;
+        setBusy(false);
       }
     });
+    removeBtn.addEventListener("click", async () => {
+      const label = source.label || `${source.user}@${source.host}`;
+      if (!window.confirm(`Disconnect ${label}?`)) return;
+      removeBtn.textContent = "...";
+      setBusy(true);
+      try {
+        await deleteSource(source.id);
+        await refreshSources();
+        state.cache.clear();
+        setSelectedWindow(state.selected);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        removeBtn.textContent = "x";
+        setBusy(false);
+      }
+    });
+
     actions.appendChild(syncBtn);
+    actions.appendChild(removeBtn);
 
     item.appendChild(meta);
     item.appendChild(actions);
@@ -479,6 +549,8 @@ function setupSources() {
       elements.sourcePassword.value = "";
       setSourceFormVisible(false);
       await refreshSources();
+      state.cache.clear();
+      setSelectedWindow(state.selected);
     } catch (err) {
       alert(err.message);
     }
@@ -486,8 +558,152 @@ function setupSources() {
   refreshSources();
 }
 
+setupAsciiTitle();
 setupButtons();
 setupCustomRange();
 setupChartInteraction();
 setupSources();
 setSelectedWindow(state.selected);
+
+function setupAsciiTitle() {
+  const target = elements.asciiTitle;
+  if (!target) return;
+
+  const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const symbolNoise = ["!", "@", "#", "$", "%", "^", "-", "_", "=", "+", ":", ";", "[", "]", "{", "}", "\\", "|"];
+  const font = {
+    A: [" ### ", "#   #", "#####", "#   #", "#   #"],
+    C: [" ####", "#    ", "#    ", "#    ", " ####"],
+    D: ["#### ", "#   #", "#   #", "#   #", "#### "],
+    E: ["#####", "#    ", "#### ", "#    ", "#####"],
+    I: ["#####", "  #  ", "  #  ", "  #  ", "#####"],
+    L: ["#    ", "#    ", "#    ", "#    ", "#####"],
+    N: ["#   #", "##  #", "# # #", "#  ##", "#   #"],
+    O: [" ### ", "#   #", "#   #", "#   #", " ### "],
+    T: ["#####", "  #  ", "  #  ", "  #  ", "  #  "],
+    U: ["#   #", "#   #", "#   #", "#   #", " ### "],
+    X: ["#   #", " # # ", "  #  ", " # # ", "#   #"],
+    Z: ["#####", "   # ", "  #  ", " #   ", "#####"],
+    " ": ["     ", "     ", "     ", "     ", "     "],
+  };
+
+  function randomLetter() {
+    return alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+
+  function randomSymbolChar() {
+    return symbolNoise[Math.floor(Math.random() * symbolNoise.length)];
+  }
+
+  function renderWordMask(word) {
+    const letters = word.toUpperCase().split("");
+    const rows = Array.from({ length: 5 }, () => "");
+    letters.forEach((letter, idx) => {
+      const glyph = font[letter] || font[" "];
+      rows.forEach((row, i) => {
+        rows[i] += glyph[i];
+        if (idx < letters.length - 1) rows[i] += " ";
+      });
+    });
+    return rows;
+  }
+
+  const maskRows = renderWordMask("Codex Utilization");
+  const height = maskRows.length;
+  const width = Math.max(...maskRows.map((row) => row.length));
+  const cells = [];
+  const finalGrid = Array.from({ length: height }, () => Array.from({ length: width }, () => " "));
+
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      const isMask = (maskRows[row][col] || " ") !== " ";
+      const stableChar = isMask ? randomLetter() : " ";
+      finalGrid[row][col] = stableChar;
+      cells.push({
+        row,
+        col,
+        isMask,
+        stableChar,
+        threshold: Math.random(),
+        band: 0.16 + Math.random() * 0.1,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+  let rafId = null;
+
+  function render(progress) {
+    const grid = Array.from({ length: height }, () => Array.from({ length: width }, () => " "));
+
+    cells.forEach((cell) => {
+      const local = (progress - (cell.threshold - cell.band * 0.5)) / cell.band;
+      const settle = Math.max(0, Math.min(1, local));
+      const pulse =
+        0.5 + 0.5 * Math.sin(progress * 26 + cell.row * 1.7 + cell.col * 0.33 + cell.phase);
+
+      if (settle <= 0) {
+        grid[cell.row][cell.col] = randomSymbolChar();
+        return;
+      }
+
+      if (cell.isMask) {
+        const shimmerChance = (1 - settle) * (0.78 + 0.18 * pulse);
+        if (Math.random() < shimmerChance) {
+          grid[cell.row][cell.col] = randomSymbolChar();
+        } else {
+          grid[cell.row][cell.col] = cell.stableChar;
+        }
+        if (Math.random() < (1 - settle) * 0.1) {
+          grid[cell.row][cell.col] = " ";
+        }
+        return;
+      }
+
+      if (settle < 0.2) {
+        grid[cell.row][cell.col] = randomSymbolChar();
+        return;
+      }
+
+      const shimmerChance = (1 - settle) * (0.84 + 0.12 * pulse);
+      grid[cell.row][cell.col] = Math.random() < shimmerChance ? randomSymbolChar() : " ";
+    });
+
+    target.textContent = grid.map((row) => row.join("")).join("\n");
+  }
+
+  function finalize() {
+    target.textContent = finalGrid.map((row) => row.join("")).join("\n");
+  }
+
+  function start() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (prefersReduced.matches) {
+      finalize();
+      return;
+    }
+    const duration = 950;
+    let startTime = null;
+
+    function tick(time) {
+      if (!startTime) startTime = time;
+      const elapsed = time - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      render(progress);
+      if (progress < 1) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        finalize();
+        rafId = null;
+      }
+    }
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  prefersReduced.addEventListener("change", start);
+  start();
+}
