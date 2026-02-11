@@ -43,13 +43,16 @@
       </section>
 
       <section class="sources">
-        <div class="sources-card">
+        <div class="sources-card" id="sourcesCard">
           <div class="sources-header">
             <div>
               <div class="sources-title">Sources</div>
               <div class="sources-subtitle">Add a remote machine (ssh).</div>
             </div>
-            <button class="ghost" id="toggleSourceForm">+ Source</button>
+            <div class="sources-header-actions">
+              <button class="ghost" id="toggleSources">Expand</button>
+              <button class="ghost" id="toggleSourceForm">+ Source</button>
+            </div>
           </div>
           <form class="source-form" id="sourceForm">
             <label>

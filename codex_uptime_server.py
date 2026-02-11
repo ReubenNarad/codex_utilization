@@ -275,6 +275,19 @@ def sync_source(source: dict) -> None:
     dest_dir = SOURCES_DIR / source.get("id") / "sessions"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    ssh_opts = [
+        "-p",
+        str(port),
+        "-o",
+        "PreferredAuthentications=password",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "NumberOfPasswordPrompts=1",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+    ]
+
     remote_base = f"{user}@{host}:{path.rstrip('/')}"
     if shutil.which("rsync"):
         remote = f"{remote_base}/"
@@ -285,7 +298,7 @@ def sync_source(source: dict) -> None:
             "rsync",
             "-az",
             "-e",
-            f"ssh -p {port}",
+            " ".join(["ssh", *ssh_opts]),
             remote,
             str(dest_dir),
         ]
@@ -297,15 +310,28 @@ def sync_source(source: dict) -> None:
             password,
             "scp",
             "-r",
-            "-P",
-            str(port),
+            *ssh_opts,
             remote,
             str(dest_dir),
         ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = dict(os.environ)
+    env.pop("SSH_ASKPASS", None)
+    env.pop("DISPLAY", None)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Sync failed.")
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        combined = "\n".join(part for part in [stderr, stdout] if part)
+        if "Permission denied" in combined:
+            raise RuntimeError(
+                "SSH authentication failed. Check host/user/password, or enable password auth on the remote SSH server."
+            )
+        if "Could not resolve hostname" in combined:
+            raise RuntimeError("SSH failed: could not resolve remote hostname.")
+        if "Connection refused" in combined:
+            raise RuntimeError("SSH failed: connection refused (check host/port and firewall).")
+        raise RuntimeError(combined or "Sync failed.")
 
 
 def main() -> int:

@@ -34,6 +34,8 @@ const elements = {
   chartTitle: document.getElementById("chartTitle"),
   chartSubtitle: document.getElementById("chartSubtitle"),
   loadingIndicator: document.getElementById("loadingIndicator"),
+  sourcesCard: document.getElementById("sourcesCard"),
+  toggleSources: document.getElementById("toggleSources"),
   toggleSourceForm: document.getElementById("toggleSourceForm"),
   sourceForm: document.getElementById("sourceForm"),
   sourceLabel: document.getElementById("sourceLabel"),
@@ -294,7 +296,7 @@ function drawChart() {
   ctx.clearRect(0, 0, width, height);
 
   const theme = getChartTheme();
-  const padding = { top: 24, right: 20, bottom: 34, left: 56 };
+  const padding = { top: 28, right: 24, bottom: 50, left: 72 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
@@ -330,7 +332,7 @@ function drawChart() {
   const ticks = getLinearTicks(maxTokens);
   ctx.strokeStyle = theme.grid;
   ctx.fillStyle = theme.label;
-  ctx.font = theme.font;
+  ctx.font = theme.axisFont;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   ticks.forEach((value) => {
@@ -356,16 +358,16 @@ function drawChart() {
     ctx.shadowBlur = 0;
     if (index % labelEvery === 0) {
       ctx.fillStyle = theme.label;
-      ctx.font = theme.font;
+      ctx.font = theme.axisFont;
       ctx.textAlign = "center";
-      ctx.fillText(formatBucketLabel(entry, state.granularity), x + barWidth / 2, chartHeight + 18);
+      ctx.fillText(formatBucketLabel(entry, state.granularity), x + barWidth / 2, chartHeight + 24);
     }
 
     if (state.hoverIndex === index) {
       ctx.fillStyle = theme.hover;
-      ctx.font = theme.font;
+      ctx.font = theme.hoverFont;
       ctx.textAlign = "center";
-      ctx.fillText(formatTokens(tokens), x + barWidth / 2, y - 6);
+      ctx.fillText(formatTokens(tokens), x + barWidth / 2, y - 10);
     }
 
     state.barRects.push({
@@ -389,7 +391,8 @@ function getChartTheme() {
     bar: value("--chart-bar", "rgba(82, 255, 124, 0.7)"),
     barGlow: value("--chart-bar-glow", "rgba(82, 255, 124, 0.35)"),
     hover: value("--chart-hover", "rgba(220, 255, 210, 0.9)"),
-    font: value("--chart-font", "11px 'IBM Plex Mono', ui-monospace, monospace"),
+    axisFont: value("--chart-axis-font", "14px 'Courier New', Courier, ui-monospace, monospace"),
+    hoverFont: value("--chart-hover-font", "700 16px 'Courier New', Courier, ui-monospace, monospace"),
   };
 }
 
@@ -434,6 +437,18 @@ function setupChartInteraction() {
 
 function setSourceFormVisible(visible) {
   elements.sourceForm.classList.toggle("visible", visible);
+}
+
+function setSourcesCollapsed(collapsed) {
+  elements.sourcesCard.classList.toggle("collapsed", collapsed);
+  elements.toggleSources.textContent = collapsed ? "Expand" : "Collapse";
+  if (collapsed) {
+    setSourceFormVisible(false);
+  }
+}
+
+function isSourcesCollapsed() {
+  return elements.sourcesCard.classList.contains("collapsed");
 }
 
 function renderSources(sources) {
@@ -528,7 +543,16 @@ async function refreshSources() {
 }
 
 function setupSources() {
+  setSourcesCollapsed(true);
+  elements.toggleSources.addEventListener("click", () => {
+    setSourcesCollapsed(!isSourcesCollapsed());
+  });
   elements.toggleSourceForm.addEventListener("click", () => {
+    if (isSourcesCollapsed()) {
+      setSourcesCollapsed(false);
+      setSourceFormVisible(true);
+      return;
+    }
     setSourceFormVisible(!elements.sourceForm.classList.contains("visible"));
   });
   elements.sourceCancel.addEventListener("click", () => {
@@ -609,7 +633,21 @@ function setupAsciiTitle() {
     return rows;
   }
 
-  const maskRows = renderWordMask("Codex Utilization");
+  function scaleMask(rows, scaleX = 2, scaleY = 2) {
+    const out = [];
+    rows.forEach((row) => {
+      const expanded = row
+        .split("")
+        .map((char) => char.repeat(scaleX))
+        .join("");
+      for (let i = 0; i < scaleY; i += 1) {
+        out.push(expanded);
+      }
+    });
+    return out;
+  }
+
+  const maskRows = scaleMask(renderWordMask("Codex Utilization"), 2, 2);
   const height = maskRows.length;
   const width = Math.max(...maskRows.map((row) => row.length));
   const cells = [];
@@ -686,13 +724,18 @@ function setupAsciiTitle() {
       return;
     }
     const duration = 950;
+    const frameInterval = 1000 / 36;
     let startTime = null;
+    let lastRenderTime = 0;
 
     function tick(time) {
       if (!startTime) startTime = time;
       const elapsed = time - startTime;
       const progress = Math.min(1, elapsed / duration);
-      render(progress);
+      if (time - lastRenderTime >= frameInterval || progress >= 1) {
+        render(progress);
+        lastRenderTime = time;
+      }
       if (progress < 1) {
         rafId = requestAnimationFrame(tick);
       } else {
